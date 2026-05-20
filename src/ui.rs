@@ -414,43 +414,75 @@ impl NothingCanvas {
     }
 }
 
-pub fn render_dock_canvas(state: &NothingUiState, width: u32, _height: u32) -> NothingCanvas {
-    let dock_w = 900.min(width as usize - 40);
-    let dock_h = 56;
-    let mut canvas = NothingCanvas::new(dock_w, dock_h);
+pub fn render_dock_canvas(state: &NothingUiState, layout_mode: crate::layout::LayoutMode, width: u32, _height: u32) -> NothingCanvas {
+    let bar_w = width as usize;
+    let bar_h = 40;
+    let mut canvas = NothingCanvas::new(bar_w, bar_h);
     
-    // Draw semi-transparent black background
-    canvas.draw_rounded_rect(0, 0, dock_w, dock_h, 28, 0, 0, 0, 230);
+    // Choose colors based on dark mode toggle
+    let (bg_color, border_color, primary_color, secondary_color, logo_color) = if state.dark_mode {
+        // Dark theme colors
+        (
+            (11, 11, 11, 230),    // bg
+            (45, 45, 45, 255),    // border
+            (255, 255, 255, 255), // primary text
+            (160, 160, 160, 255), // secondary text
+            (255, 255, 255)       // logo
+        )
+    } else {
+        // Light theme colors
+        (
+            (240, 240, 240, 230), // bg
+            (200, 200, 200, 255), // border
+            (0, 0, 0, 255),       // primary text
+            (100, 100, 100, 255), // secondary text
+            (0, 0, 0)             // logo
+        )
+    };
+
+    // Draw background
+    canvas.clear(bg_color.0, bg_color.1, bg_color.2, bg_color.3);
     
-    // Draw thin gray border
-    canvas.draw_rounded_rect_border(0, 0, dock_w, dock_h, 28, 1, 60, 60, 60, 255);
+    // Draw thin bottom border
+    for x in 0..bar_w {
+        canvas.set_pixel(x, bar_h - 1, border_color.0, border_color.1, border_color.2, border_color.3);
+    }
     
-    // Left: 3x3 dot matrix logo
-    let logo_x = 24;
-    let logo_y = 18;
+    // Draw 3x3 logo
+    let logo_x = 16;
+    let logo_y = 12;
     for r in 0..3 {
         for c in 0..3 {
-            canvas.draw_circle(logo_x + c * 10 + 4, logo_y + r * 10 + 4, 3, 255, 255, 255, 255);
+            canvas.draw_circle(logo_x + c * 6 + 1, logo_y + r * 6 + 1, 1, logo_color.0, logo_color.1, logo_color.2, 255);
         }
     }
     
-    // Draw "NOTHING" dot matrix text
-    canvas.draw_text_dots("NOTHING", 64, 21, 1, 1, 4, 255, 255, 255, 255);
+    // Title
+    canvas.draw_text_dots("NOTHING", 44, 13, 1, 1, 3, primary_color.0, primary_color.1, primary_color.2, 255);
 
-    // Right: Clock & Stats
+    // Center active layout
+    let layout_str = match layout_mode {
+        crate::layout::LayoutMode::Floating => "FLOATING",
+        crate::layout::LayoutMode::MasterStack => "TILING",
+    };
+    let layout_len = layout_str.len();
+    let layout_text_w = layout_len * 10 + if layout_len > 0 { (layout_len - 1) * 3 } else { 0 };
+    let layout_x = (bar_w - layout_text_w) / 2;
+    canvas.draw_text_dots(layout_str, layout_x, 13, 1, 1, 3, primary_color.0, primary_color.1, primary_color.2, 255);
+
+    // Right clock
     let local_time = chrono::Local::now();
     let clock_str = local_time.format("%H:%M:%S").to_string();
+    let clock_x = bar_w.saturating_sub(130);
+    canvas.draw_text_dots(&clock_str, clock_x, 13, 1, 1, 3, primary_color.0, primary_color.1, primary_color.2, 255);
     
+    // Right stats
     let stats_str = format!("CPU {}%  RAM {}%  BAT {}%", state.cpu_usage, state.mem_usage, state.battery_percentage);
-    
-    let stats_x = dock_w.saturating_sub(420);
-    let clock_x = dock_w.saturating_sub(120);
-    
-    canvas.draw_text_dots(&stats_str, stats_x, 21, 1, 1, 3, 160, 160, 160, 255);
-    canvas.draw_text_dots(&clock_str, clock_x, 21, 1, 1, 3, 255, 255, 255, 255);
+    let stats_x = bar_w.saturating_sub(430);
+    canvas.draw_text_dots(&stats_str, stats_x, 13, 1, 1, 3, secondary_color.0, secondary_color.1, secondary_color.2, 255);
     
     // Red dot accent
-    canvas.draw_circle(dock_w - 24, 28, 4, 255, 0, 0, 255);
+    canvas.draw_circle(bar_w - 20, 20, 3, 255, 0, 0, 255);
 
     canvas
 }
@@ -458,8 +490,28 @@ pub fn render_dock_canvas(state: &NothingUiState, width: u32, _height: u32) -> N
 pub fn render_dashboard_canvas(state: &NothingUiState, width: u32, height: u32) -> NothingCanvas {
     let mut canvas = NothingCanvas::new(width as usize, height as usize);
     
-    // 85% opacity dark overlay
-    canvas.clear(10, 10, 10, 217);
+    // Choose colors based on dark mode toggle
+    let (bg_overlay_color, widget_bg_color, widget_border_color, primary_color, secondary_color, hole_color) = if state.dark_mode {
+        (
+            (10, 10, 10, 217),      // bg_overlay
+            (0, 0, 0, 240),         // widget_bg
+            (80, 80, 80, 255),      // widget_border
+            (255, 255, 255, 255),   // primary_text
+            (140, 140, 140, 255),   // secondary_text
+            (0, 0, 0)               // hole color (matching widget_bg)
+        )
+    } else {
+        (
+            (240, 240, 240, 217),   // bg_overlay
+            (255, 255, 255, 240),   // widget_bg
+            (180, 180, 180, 255),   // widget_border
+            (0, 0, 0, 255),         // primary_text
+            (100, 100, 100, 255),   // secondary_text
+            (255, 255, 255)         // hole color (matching widget_bg)
+        )
+    };
+
+    canvas.clear(bg_overlay_color.0, bg_overlay_color.1, bg_overlay_color.2, bg_overlay_color.3);
     
     // Center the grid of widgets (780x380)
     let dx_offset = (width as i32 - 780) / 2;
@@ -473,38 +525,38 @@ pub fn render_dashboard_canvas(state: &NothingUiState, width: u32, height: u32) 
     let row1_y = (dy_offset + 200) as usize;
 
     // 1. Clock Widget (2x2 grid size: 380x380)
-    canvas.draw_rounded_rect(col0_x, row0_y, 380, 380, 24, 0, 0, 0, 240);
-    canvas.draw_rounded_rect_border(col0_x, row0_y, 380, 380, 24, 1, 80, 80, 80, 255);
+    canvas.draw_rounded_rect(col0_x, row0_y, 380, 380, 24, widget_bg_color.0, widget_bg_color.1, widget_bg_color.2, widget_bg_color.3);
+    canvas.draw_rounded_rect_border(col0_x, row0_y, 380, 380, 24, 1, widget_border_color.0, widget_border_color.1, widget_border_color.2, widget_border_color.3);
     
     let local_time = chrono::Local::now();
     let hh_str = local_time.format("%H").to_string();
     let mm_str = local_time.format("%M").to_string();
     
     // Big stacked clock
-    let clock_dx = col0_x + 106; // Centered offset: (380 - (30 * 2 + 12 = 72)) / 2 is actually 154, let's adjust for wider spacing or letters
+    let clock_dx = col0_x + 106;
     let hh_dy = row0_y + 80;
     let mm_dy = row0_y + 190;
     
-    canvas.draw_text_dots(&hh_str, clock_dx, hh_dy, 6, 2, 16, 255, 255, 255, 255);
-    canvas.draw_text_dots(&mm_str, clock_dx, mm_dy, 6, 2, 16, 255, 255, 255, 255);
+    canvas.draw_text_dots(&hh_str, clock_dx, hh_dy, 6, 2, 16, primary_color.0, primary_color.1, primary_color.2, primary_color.3);
+    canvas.draw_text_dots(&mm_str, clock_dx, mm_dy, 6, 2, 16, primary_color.0, primary_color.1, primary_color.2, primary_color.3);
     
-    canvas.draw_text_dots("TIME", col0_x + 30, row0_y + 30, 1, 1, 3, 140, 140, 140, 255);
+    canvas.draw_text_dots("TIME", col0_x + 30, row0_y + 30, 1, 1, 3, secondary_color.0, secondary_color.1, secondary_color.2, secondary_color.3);
     canvas.draw_circle(col0_x + 350, row0_y + 350, 6, 255, 0, 0, 255);
 
     // 2. SYS Widget (CPU + RAM) (1x1: 180x180)
-    canvas.draw_rounded_rect(col2_x, row0_y, 180, 180, 24, 0, 0, 0, 240);
-    canvas.draw_rounded_rect_border(col2_x, row0_y, 180, 180, 24, 1, 80, 80, 80, 255);
-    canvas.draw_text_dots("SYS", col2_x + 20, row0_y + 20, 1, 1, 3, 140, 140, 140, 255);
+    canvas.draw_rounded_rect(col2_x, row0_y, 180, 180, 24, widget_bg_color.0, widget_bg_color.1, widget_bg_color.2, widget_bg_color.3);
+    canvas.draw_rounded_rect_border(col2_x, row0_y, 180, 180, 24, 1, widget_border_color.0, widget_border_color.1, widget_border_color.2, widget_border_color.3);
+    canvas.draw_text_dots("SYS", col2_x + 20, row0_y + 20, 1, 1, 3, secondary_color.0, secondary_color.1, secondary_color.2, secondary_color.3);
     
     let cpu_str = format!("CPU {}%", state.cpu_usage);
     let ram_str = format!("RAM {}%", state.mem_usage);
-    canvas.draw_text_dots(&cpu_str, col2_x + 20, row0_y + 60, 2, 1, 4, 255, 255, 255, 255);
-    canvas.draw_text_dots(&ram_str, col2_x + 20, row0_y + 110, 2, 1, 4, 255, 255, 255, 255);
+    canvas.draw_text_dots(&cpu_str, col2_x + 20, row0_y + 60, 2, 1, 4, primary_color.0, primary_color.1, primary_color.2, primary_color.3);
+    canvas.draw_text_dots(&ram_str, col2_x + 20, row0_y + 110, 2, 1, 4, primary_color.0, primary_color.1, primary_color.2, primary_color.3);
 
     // 3. PWR Widget (Battery + Uptime) (1x1: 180x180)
-    canvas.draw_rounded_rect(col2_x, row1_y, 180, 180, 24, 0, 0, 0, 240);
-    canvas.draw_rounded_rect_border(col2_x, row1_y, 180, 180, 24, 1, 80, 80, 80, 255);
-    canvas.draw_text_dots("PWR", col2_x + 20, row1_y + 20, 1, 1, 3, 140, 140, 140, 255);
+    canvas.draw_rounded_rect(col2_x, row1_y, 180, 180, 24, widget_bg_color.0, widget_bg_color.1, widget_bg_color.2, widget_bg_color.3);
+    canvas.draw_rounded_rect_border(col2_x, row1_y, 180, 180, 24, 1, widget_border_color.0, widget_border_color.1, widget_border_color.2, widget_border_color.3);
+    canvas.draw_text_dots("PWR", col2_x + 20, row1_y + 20, 1, 1, 3, secondary_color.0, secondary_color.1, secondary_color.2, secondary_color.3);
     
     let bat_char = if state.battery_charging { "+" } else { "" };
     let bat_str = format!("BAT {}{}%", bat_char, state.battery_percentage);
@@ -515,17 +567,21 @@ pub fn render_dashboard_canvas(state: &NothingUiState, width: u32, height: u32) 
     } else {
         format!("UPT {}M", state.uptime_secs / 60)
     };
-    canvas.draw_text_dots(&bat_str, col2_x + 20, row1_y + 60, 2, 1, 4, 255, 255, 255, 255);
-    canvas.draw_text_dots(&upt_str, col2_x + 20, row1_y + 110, 2, 1, 4, 255, 255, 255, 255);
+    canvas.draw_text_dots(&bat_str, col2_x + 20, row1_y + 60, 2, 1, 4, primary_color.0, primary_color.1, primary_color.2, primary_color.3);
+    canvas.draw_text_dots(&upt_str, col2_x + 20, row1_y + 110, 2, 1, 4, primary_color.0, primary_color.1, primary_color.2, primary_color.3);
 
     // 4. WIFI Toggle Widget (1x1: 180x180)
-    canvas.draw_rounded_rect(col3_x, row0_y, 180, 180, 24, 0, 0, 0, 240);
-    canvas.draw_rounded_rect_border(col3_x, row0_y, 180, 180, 24, 1, 80, 80, 80, 255);
-    canvas.draw_text_dots("WIFI", col3_x + 20, row0_y + 20, 1, 1, 3, 140, 140, 140, 255);
+    canvas.draw_rounded_rect(col3_x, row0_y, 180, 180, 24, widget_bg_color.0, widget_bg_color.1, widget_bg_color.2, widget_bg_color.3);
+    canvas.draw_rounded_rect_border(col3_x, row0_y, 180, 180, 24, 1, widget_border_color.0, widget_border_color.1, widget_border_color.2, widget_border_color.3);
+    canvas.draw_text_dots("WIFI", col3_x + 20, row0_y + 20, 1, 1, 3, secondary_color.0, secondary_color.1, secondary_color.2, secondary_color.3);
     
-    let wifi_color = if state.wifi_enabled { (255, 255, 255) } else { (80, 80, 80) };
+    let wifi_color = if state.wifi_enabled {
+        if state.dark_mode { (255, 255, 255) } else { (0, 0, 0) }
+    } else {
+        if state.dark_mode { (80, 80, 80) } else { (180, 180, 180) }
+    };
     canvas.draw_circle(col3_x + 90, row0_y + 90, 28, wifi_color.0, wifi_color.1, wifi_color.2, 255);
-    canvas.draw_circle(col3_x + 90, row0_y + 90, 24, 0, 0, 0, 255);
+    canvas.draw_circle(col3_x + 90, row0_y + 90, 24, hole_color.0, hole_color.1, hole_color.2, 255);
     canvas.draw_circle(col3_x + 90, row0_y + 90, 4, wifi_color.0, wifi_color.1, wifi_color.2, 255);
     
     let wifi_status = if state.wifi_enabled { "ON" } else { "OFF" };
@@ -533,20 +589,24 @@ pub fn render_dashboard_canvas(state: &NothingUiState, width: u32, height: u32) 
     canvas.draw_text_dots(wifi_status, wifi_text_x, row0_y + 145, 1, 1, 3, wifi_color.0, wifi_color.1, wifi_color.2, 255);
 
     // 5. DARK Toggle Widget (1x1: 180x180)
-    canvas.draw_rounded_rect(col3_x, row1_y, 180, 180, 24, 0, 0, 0, 240);
-    canvas.draw_rounded_rect_border(col3_x, row1_y, 180, 180, 24, 1, 80, 80, 80, 255);
-    canvas.draw_text_dots("DARK", col3_x + 20, row1_y + 20, 1, 1, 3, 140, 140, 140, 255);
+    canvas.draw_rounded_rect(col3_x, row1_y, 180, 180, 24, widget_bg_color.0, widget_bg_color.1, widget_bg_color.2, widget_bg_color.3);
+    canvas.draw_rounded_rect_border(col3_x, row1_y, 180, 180, 24, 1, widget_border_color.0, widget_border_color.1, widget_border_color.2, widget_border_color.3);
+    canvas.draw_text_dots("DARK", col3_x + 20, row1_y + 20, 1, 1, 3, secondary_color.0, secondary_color.1, secondary_color.2, secondary_color.3);
     
-    let dark_color = if state.dark_mode { (255, 255, 255) } else { (80, 80, 80) };
+    let dark_color = if state.dark_mode {
+        if state.dark_mode { (255, 255, 255) } else { (0, 0, 0) }
+    } else {
+        if state.dark_mode { (80, 80, 80) } else { (180, 180, 180) }
+    };
     if state.dark_mode {
         canvas.draw_circle(col3_x + 90, row1_y + 90, 24, 255, 255, 255, 255);
-        canvas.draw_circle(col3_x + 100, row1_y + 85, 20, 0, 0, 0, 255);
+        canvas.draw_circle(col3_x + 100, row1_y + 85, 20, hole_color.0, hole_color.1, hole_color.2, 255);
     } else {
-        canvas.draw_circle(col3_x + 90, row1_y + 90, 14, 80, 80, 80, 255);
-        canvas.draw_circle(col3_x + 90, row1_y + 60, 3, 80, 80, 80, 255);
-        canvas.draw_circle(col3_x + 90, row1_y + 120, 3, 80, 80, 80, 255);
-        canvas.draw_circle(col3_x + 60, row1_y + 90, 3, 80, 80, 80, 255);
-        canvas.draw_circle(col3_x + 120, row1_y + 90, 3, 80, 80, 80, 255);
+        canvas.draw_circle(col3_x + 90, row1_y + 90, 14, 0, 0, 0, 255);
+        canvas.draw_circle(col3_x + 90, row1_y + 60, 3, 0, 0, 0, 255);
+        canvas.draw_circle(col3_x + 90, row1_y + 120, 3, 0, 0, 0, 255);
+        canvas.draw_circle(col3_x + 60, row1_y + 90, 3, 0, 0, 0, 255);
+        canvas.draw_circle(col3_x + 120, row1_y + 90, 3, 0, 0, 0, 255);
     }
     
     let dark_status = if state.dark_mode { "ON" } else { "OFF" };

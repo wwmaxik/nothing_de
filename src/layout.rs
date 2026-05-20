@@ -76,29 +76,33 @@ pub fn apply_layout(state: &mut NothingCompositorState) {
         }
 
         LayoutMode::MasterStack => {
+            let top_bar_h = 40;
+            let usable_h = output_geo.size.h - top_bar_h;
+            let start_y = output_geo.loc.y + top_bar_h;
+
             if count == 1 {
-                // Single window fills the entire output
+                // Single window fills the entire output minus the top bar
                 let window = &windows[0];
-                configure_tiled(window, (output_geo.size.w, output_geo.size.h).into());
-                state.space.map_element(window.clone(), output_geo.loc, false);
+                configure_tiled(window, (output_geo.size.w, usable_h).into());
+                state.space.map_element(window.clone(), (output_geo.loc.x, start_y), false);
             } else {
                 let master_width = (output_geo.size.w as f64 * MASTER_RATIO) as i32;
                 let stack_width = output_geo.size.w - master_width;
                 let stack_count = (count - 1) as i32;
-                let stack_height = output_geo.size.h / stack_count;
+                let stack_height = usable_h / stack_count;
 
                 // Master window (first in tracking list)
                 let master = &windows[0];
-                configure_tiled(master, (master_width, output_geo.size.h).into());
-                state.space.map_element(master.clone(), output_geo.loc, false);
+                configure_tiled(master, (master_width, usable_h).into());
+                state.space.map_element(master.clone(), (output_geo.loc.x, start_y), false);
 
                 // Stack windows (remaining)
                 for (i, window) in windows[1..].iter().enumerate() {
                     let x = output_geo.loc.x + master_width;
-                    let y = output_geo.loc.y + (i as i32 * stack_height);
+                    let y = start_y + (i as i32 * stack_height);
                     // Last stack window absorbs rounding remainder
                     let h = if i as i32 == stack_count - 1 {
-                        output_geo.size.h - (i as i32 * stack_height)
+                        usable_h - (i as i32 * stack_height)
                     } else {
                         stack_height
                     };

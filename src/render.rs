@@ -29,8 +29,12 @@ pub fn render_frame(
     let size = backend.window_size();
     let damage = Rectangle::from_size(size);
 
-    // Deep dark background color #080808
-    let clear_color = [8.0 / 255.0, 8.0 / 255.0, 8.0 / 255.0, 1.0];
+    // Background color dynamically changes based on dark mode toggle
+    let clear_color = if state.ui_state.dark_mode {
+        [8.0 / 255.0, 8.0 / 255.0, 8.0 / 255.0, 1.0] // #080808
+    } else {
+        [245.0 / 255.0, 245.0 / 255.0, 245.0 / 255.0, 1.0] // #f5f5f5
+    };
 
     // 1. Update stats
     state.ui_state.update();
@@ -42,8 +46,7 @@ pub fn render_frame(
     let screen_h = output_geo.size.h;
 
     let (canvas_w, canvas_h) = if state.ui_state.ui_mode == crate::ui::UiMode::Desktop {
-        let dock_w = 900.min(screen_w as usize - 40);
-        (dock_w, 56)
+        (screen_w as usize, 40)
     } else {
         (screen_w as usize, screen_h as usize)
     };
@@ -79,7 +82,7 @@ pub fn render_frame(
 
         // 4. Render canvas pixels
         let canvas = if state.ui_state.ui_mode == crate::ui::UiMode::Desktop {
-            crate::ui::render_dock_canvas(&state.ui_state, screen_w as u32, screen_h as u32)
+            crate::ui::render_dock_canvas(&state.ui_state, state.layout_mode, screen_w as u32, screen_h as u32)
         } else {
             crate::ui::render_dashboard_canvas(&state.ui_state, screen_w as u32, screen_h as u32)
         };
@@ -98,14 +101,7 @@ pub fn render_frame(
         // 6. Build the custom elements array for space render
         let mut custom_elements = Vec::new();
         if let Some((ref trb, _)) = state.ui_render_buffer {
-            let location_logical: Point<f64, Logical> = if state.ui_state.ui_mode == crate::ui::UiMode::Desktop {
-                let dock_w = 900.min(screen_w as usize - 40);
-                let x = (screen_w as f64 - dock_w as f64) / 2.0;
-                let y = screen_h as f64 - 56.0 - 16.0;
-                Point::from((x, y))
-            } else {
-                Point::from((0.0, 0.0))
-            };
+            let location_logical: Point<f64, Logical> = Point::from((0.0, 0.0));
             // Convert to physical location
             let location_physical = Point::from((location_logical.x * scale, location_logical.y * scale));
 

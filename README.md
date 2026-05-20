@@ -11,7 +11,7 @@ Inspired by Nothing's signature brand design, this DE implements:
 - **High-contrast Minimalist UI**: Sleek black, white, and gray color palette.
 - **Glassmorphic & Rounded Elements**: Smooth borders, curved docks, and soft shadows designed to feel premium.
 - **Dual Mode Interface**:
-  - **Desktop Mode**: A clean workspace with a central, bottom-docked status panel showing system vitals, time, and active layout.
+  - **Desktop Mode**: A clean workspace with a top-docked status bar showing active layout, status icons, and time.
   - **Dashboard Mode**: An interactive, full-screen widget panel inspired by the Nothing OS widgets.
 
 ---
@@ -19,7 +19,7 @@ Inspired by Nothing's signature brand design, this DE implements:
 ## ✨ Features
 
 - **Dual-Mode UI**:
-  - **Desktop Mode**: Renders a persistent bottom dock panel at the bottom center.
+  - **Desktop Mode**: Renders a persistent status bar panel at the top of the screen.
   - **Dashboard Mode** (Toggled via `Super + D`): Renders a beautiful full-screen overlay with dot-matrix digital clock, CPU usage circular gauge, RAM usage circular gauge, system uptime, battery status widget, and interactive buttons.
 - **Interactive Widgets**:
   - **Wi-Fi Toggle Widget**: Interactive widget that toggles the Wi-Fi state on and off, changing color and updating icons.
