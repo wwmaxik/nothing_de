@@ -93,7 +93,27 @@ impl NothingCompositorState {
                             if keysym == smithay::input::keyboard::keysyms::KEY_d.into() {
                                 state.ui_state.ui_mode = match state.ui_state.ui_mode {
                                     crate::ui::UiMode::Desktop => crate::ui::UiMode::Dashboard,
-                                    crate::ui::UiMode::Dashboard => crate::ui::UiMode::Desktop,
+                                    _ => crate::ui::UiMode::Desktop,
+                                };
+                                tracing::info!("UI Mode changed to {:?}", state.ui_state.ui_mode);
+                                return FilterResult::Intercept(());
+                            }
+
+                            // Super + A: Toggle App Launcher
+                            if keysym == smithay::input::keyboard::keysyms::KEY_a.into() {
+                                state.ui_state.ui_mode = match state.ui_state.ui_mode {
+                                    crate::ui::UiMode::AppLauncher => crate::ui::UiMode::Desktop,
+                                    _ => crate::ui::UiMode::AppLauncher,
+                                };
+                                tracing::info!("UI Mode changed to {:?}", state.ui_state.ui_mode);
+                                return FilterResult::Intercept(());
+                            }
+
+                            // Super + S: Toggle Quick Settings
+                            if keysym == smithay::input::keyboard::keysyms::KEY_s.into() {
+                                state.ui_state.ui_mode = match state.ui_state.ui_mode {
+                                    crate::ui::UiMode::QuickSettings => crate::ui::UiMode::Desktop,
+                                    _ => crate::ui::UiMode::QuickSettings,
                                 };
                                 tracing::info!("UI Mode changed to {:?}", state.ui_state.ui_mode);
                                 return FilterResult::Intercept(());
@@ -123,7 +143,7 @@ impl NothingCompositorState {
                 let pointer = self.seat.get_pointer().unwrap();
 
                 // Find surface under the pointer
-                let under = if self.ui_state.ui_mode == crate::ui::UiMode::Dashboard {
+                let under = if self.ui_state.ui_mode != crate::ui::UiMode::Desktop {
                     None
                 } else {
                     self.space.element_under(pos).and_then(|(window, location)| {
@@ -153,7 +173,7 @@ impl NothingCompositorState {
 
                 const BTN_LEFT: u32 = 0x110;
 
-                if self.ui_state.ui_mode == crate::ui::UiMode::Dashboard {
+                if self.ui_state.ui_mode != crate::ui::UiMode::Desktop {
                     if ButtonState::Pressed == button_state && button == BTN_LEFT {
                         let size = if let Some(output) = self.space.outputs().next() {
                             output.current_mode().map(|m| m.size).unwrap_or_else(|| (1280, 800).into())

@@ -5,6 +5,8 @@ use smithay::utils::{Logical, Point};
 pub enum UiMode {
     Desktop,
     Dashboard,
+    AppLauncher,
+    QuickSettings,
 }
 
 pub struct NothingUiState {
@@ -18,6 +20,17 @@ pub struct NothingUiState {
     pub dark_mode: bool,
     pub last_stats_update: Instant,
     pub prev_cpu_times: Option<(u64, u64)>,
+    // Music player state
+    pub music_playing: bool,
+    pub music_track_index: usize,
+    // Quick settings
+    pub bluetooth_enabled: bool,
+    pub volume: u8,
+    pub brightness: u8,
+    // Active workspace
+    pub active_workspace: u8,
+    // Frame counter for animations
+    pub frame_count: u64,
 }
 
 impl NothingUiState {
@@ -33,10 +46,18 @@ impl NothingUiState {
             dark_mode: true,
             last_stats_update: Instant::now(),
             prev_cpu_times: None,
+            music_playing: false,
+            music_track_index: 0,
+            bluetooth_enabled: false,
+            volume: 80,
+            brightness: 70,
+            active_workspace: 1,
+            frame_count: 0,
         }
     }
 
     pub fn update(&mut self) {
+        self.frame_count = self.frame_count.wrapping_add(1);
         if self.last_stats_update.elapsed() < std::time::Duration::from_millis(500) && self.prev_cpu_times.is_some() {
             return;
         }
@@ -414,75 +435,209 @@ impl NothingCanvas {
     }
 }
 
-pub fn render_dock_canvas(state: &NothingUiState, layout_mode: crate::layout::LayoutMode, width: u32, _height: u32) -> NothingCanvas {
-    let bar_w = width as usize;
-    let bar_h = 40;
-    let mut canvas = NothingCanvas::new(bar_w, bar_h);
-    
-    // Choose colors based on dark mode toggle
-    let (bg_color, border_color, primary_color, secondary_color, logo_color) = if state.dark_mode {
-        // Dark theme colors
-        (
-            (11, 11, 11, 230),    // bg
-            (45, 45, 45, 255),    // border
-            (255, 255, 255, 255), // primary text
-            (160, 160, 160, 255), // secondary text
-            (255, 255, 255)       // logo
-        )
-    } else {
-        // Light theme colors
-        (
-            (240, 240, 240, 230), // bg
-            (200, 200, 200, 255), // border
-            (0, 0, 0, 255),       // primary text
-            (100, 100, 100, 255), // secondary text
-            (0, 0, 0)             // logo
-        )
-    };
+/// Helper to draw the top status bar onto a canvas at y_offset
+fn draw_top_bar(canvas: &mut NothingCanvas, state: &NothingUiState, layout_mode: crate::layout::LayoutMode, width: usize, y: usize) {
+    let bar_h = 48;
+    // Glass panel background
+    canvas.draw_rounded_rect(16, y + 4, width - 32, bar_h - 8, 20, 18, 18, 18, 190);
+    canvas.draw_rounded_rect_border(16, y + 4, width - 32, bar_h - 8, 20, 1, 255, 255, 255, 20);
 
-    // Draw background
-    canvas.clear(bg_color.0, bg_color.1, bg_color.2, bg_color.3);
-    
-    // Draw thin bottom border
-    for x in 0..bar_w {
-        canvas.set_pixel(x, bar_h - 1, border_color.0, border_color.1, border_color.2, border_color.3);
-    }
-    
-    // Draw 3x3 logo
-    let logo_x = 16;
-    let logo_y = 12;
-    for r in 0..3 {
-        for c in 0..3 {
-            canvas.draw_circle(logo_x + c * 6 + 1, logo_y + r * 6 + 1, 1, logo_color.0, logo_color.1, logo_color.2, 255);
+    let cy = y + bar_h / 2;
+    // Left: Red pulse dot
+    let pulse = if state.frame_count % 60 < 30 { 255u8 } else { 180u8 };
+    canvas.draw_circle(40, cy, 4, 255, 0, 60, pulse);
+    // Left: RUST-WM // SMITHAY
+    canvas.draw_text_dots("RUST-WM", 54, cy - 3, 1, 1, 2, 160, 160, 160, 255);
+
+    // Workspace dots
+    let ws_x = 160;
+    canvas.draw_rounded_rect(ws_x, cy - 8, 70, 16, 8, 0, 0, 0, 80);
+    for i in 0..4u8 {
+        let dx = ws_x + 10 + i as usize * 16;
+        if state.active_workspace == i + 1 {
+            canvas.draw_circle(dx, cy, 4, 255, 255, 255, 255);
+        } else {
+            canvas.draw_circle(dx, cy, 4, 255, 255, 255, 50);
         }
     }
-    
-    // Title
-    canvas.draw_text_dots("NOTHING", 44, 13, 1, 1, 3, primary_color.0, primary_color.1, primary_color.2, 255);
 
-    // Center active layout
-    let layout_str = match layout_mode {
-        crate::layout::LayoutMode::Floating => "FLOATING",
-        crate::layout::LayoutMode::MasterStack => "TILING",
-    };
-    let layout_len = layout_str.len();
-    let layout_text_w = layout_len * 10 + if layout_len > 0 { (layout_len - 1) * 3 } else { 0 };
-    let layout_x = (bar_w - layout_text_w) / 2;
-    canvas.draw_text_dots(layout_str, layout_x, 13, 1, 1, 3, primary_color.0, primary_color.1, primary_color.2, 255);
-
-    // Right clock
+    // Center: Clock + Date
     let local_time = chrono::Local::now();
-    let clock_str = local_time.format("%H:%M:%S").to_string();
-    let clock_x = bar_w.saturating_sub(130);
-    canvas.draw_text_dots(&clock_str, clock_x, 13, 1, 1, 3, primary_color.0, primary_color.1, primary_color.2, 255);
-    
-    // Right stats
-    let stats_str = format!("CPU {}%  RAM {}%  BAT {}%", state.cpu_usage, state.mem_usage, state.battery_percentage);
-    let stats_x = bar_w.saturating_sub(430);
-    canvas.draw_text_dots(&stats_str, stats_x, 13, 1, 1, 3, secondary_color.0, secondary_color.1, secondary_color.2, 255);
-    
-    // Red dot accent
-    canvas.draw_circle(bar_w - 20, 20, 3, 255, 0, 0, 255);
+    let clock_str = local_time.format("%H:%M").to_string();
+    let center_x = width / 2;
+    let clock_tw = clock_str.len() * 10;
+    canvas.draw_text_dots(&clock_str, center_x - clock_tw / 2 - 20, cy - 4, 1, 1, 3, 255, 255, 255, 255);
+    let day = local_time.format("%d").to_string();
+    let month_idx = local_time.format("%m").to_string().parse::<usize>().unwrap_or(1);
+    let months = ["", "JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+    let m = if month_idx < 13 { months[month_idx] } else { "???" };
+    let date_str = format!("{} {}", day, m);
+    canvas.draw_text_dots(&date_str, center_x + 30, cy - 3, 1, 1, 2, 160, 160, 160, 255);
+
+    // Right side: Layout toggle
+    let layout_str = match layout_mode {
+        crate::layout::LayoutMode::Floating => "FLOAT",
+        crate::layout::LayoutMode::MasterStack => "TILE",
+    };
+    let rx = width - 280;
+    canvas.draw_rounded_rect(rx, cy - 8, 60, 16, 8, 255, 255, 255, 13);
+    canvas.draw_rounded_rect_border(rx, cy - 8, 60, 16, 8, 1, 255, 255, 255, 25);
+    canvas.draw_text_dots(layout_str, rx + 8, cy - 3, 1, 1, 2, 200, 200, 200, 255);
+
+    // WiFi icon (simple dot representation)
+    let wifi_x = width - 200;
+    let wc = if state.wifi_enabled { 255u8 } else { 80u8 };
+    canvas.draw_circle(wifi_x, cy, 3, wc, wc, wc, 255);
+    canvas.draw_circle_border(wifi_x, cy, 6, 1, wc, wc, wc, 200);
+
+    // Battery circle arc
+    let bat_x = width - 170;
+    canvas.draw_circle_border(bat_x, cy, 8, 2, 255, 255, 255, 25);
+    // Draw filled arc based on percentage
+    let pct = state.battery_percentage as f64 / 100.0;
+    let steps = (pct * 50.0) as usize;
+    for s in 0..steps {
+        let angle = -std::f64::consts::FRAC_PI_2 + (s as f64 / 50.0) * std::f64::consts::TAU;
+        let px = bat_x as f64 + angle.cos() * 8.0;
+        let py = cy as f64 + angle.sin() * 8.0;
+        canvas.set_pixel(px as usize, py as usize, 255, 255, 255, 255);
+        canvas.set_pixel(px as usize + 1, py as usize, 255, 255, 255, 255);
+    }
+    let bat_str = format!("{}", state.battery_percentage);
+    let btw = bat_str.len() * 5;
+    canvas.draw_text_dots(&bat_str, bat_x - btw / 2, cy - 3, 1, 0, 1, 255, 255, 255, 255);
+
+    // Settings button (circle)
+    let set_x = width - 130;
+    canvas.draw_circle(set_x, cy, 12, 255, 255, 255, 25);
+    canvas.draw_text_dots("S", set_x - 3, cy - 4, 1, 1, 0, 255, 255, 255, 200);
+}
+
+/// Helper to draw the bottom dock
+fn draw_bottom_dock(canvas: &mut NothingCanvas, width: usize, height: usize) {
+    let dock_w = 340;
+    let dock_h = 50;
+    let dock_x = (width - dock_w) / 2;
+    let dock_y = height - dock_h - 16;
+
+    // Glass panel
+    canvas.draw_rounded_rect(dock_x, dock_y, dock_w, dock_h, 25, 18, 18, 18, 190);
+    canvas.draw_rounded_rect_border(dock_x, dock_y, dock_w, dock_h, 25, 1, 255, 255, 255, 20);
+
+    let cy = dock_y + dock_h / 2;
+
+    // Grid launcher button (white circle with dots)
+    let grid_x = dock_x + 30;
+    canvas.draw_circle(grid_x, cy, 16, 255, 255, 255, 255);
+    // 3x3 dot grid inside
+    for r in 0..3 {
+        for c in 0..3 {
+            canvas.draw_circle(grid_x - 5 + c * 5, cy - 5 + r * 5, 1, 0, 0, 0, 255);
+        }
+    }
+
+    // Separator
+    for dy in 0..20 {
+        canvas.set_pixel(dock_x + 64, cy - 10 + dy, 255, 255, 255, 25);
+    }
+
+    // App buttons: TERM, LOGS, FILE, SET
+    let labels = ["T", "A", "F", "S"];
+    for (i, label) in labels.iter().enumerate() {
+        let bx = dock_x + 90 + i * 60;
+        canvas.draw_circle(bx, cy, 16, 255, 255, 255, 13);
+        canvas.draw_circle_border(bx, cy, 16, 1, 255, 255, 255, 25);
+        canvas.draw_text_dots(label, bx - 3, cy - 4, 1, 1, 0, 255, 255, 255, 200);
+    }
+}
+
+/// Helper to draw desktop widgets on left side
+fn draw_desktop_widgets(canvas: &mut NothingCanvas, state: &NothingUiState) {
+    let wx = 32;
+    let wy = 70;
+    let wsize = 170;
+    let gap = 16;
+
+    // Widget 1: Weather
+    canvas.draw_rounded_rect(wx, wy, wsize, wsize, 28, 18, 18, 18, 190);
+    canvas.draw_rounded_rect_border(wx, wy, wsize, wsize, 28, 1, 255, 255, 255, 20);
+    canvas.draw_text_dots("MSK", wx + 16, wy + 16, 1, 1, 2, 160, 160, 160, 255);
+    canvas.draw_text_dots("24", wx + 30, wy + 55, 4, 2, 8, 255, 255, 255, 255);
+    // degree symbol as dot
+    canvas.draw_circle(wx + 120, wy + 55, 3, 255, 255, 255, 255);
+    canvas.draw_circle(wx + 120, wy + 55, 1, 18, 18, 18, 255);
+    canvas.draw_text_dots("KRASNOYARSK", wx + 12, wy + wsize - 24, 1, 0, 1, 100, 100, 100, 255);
+
+    // Widget 2: Music Player
+    let m_y = wy + wsize + gap;
+    canvas.draw_rounded_rect(wx, m_y, wsize, wsize, 28, 18, 18, 18, 190);
+    canvas.draw_rounded_rect_border(wx, m_y, wsize, wsize, 28, 1, 255, 255, 255, 20);
+    canvas.draw_circle(wx + 16, m_y + 16, 3, 255, 0, 60, 255); // red music dot
+    canvas.draw_text_dots("EAR 2", wx + 60, m_y + 14, 1, 0, 1, 160, 160, 160, 255);
+
+    let tracks = [("OVERTHINKER", "INZO"), ("NOTHING ELSE", "JOE HERTZ"), ("GHOST", "KAWAI")];
+    let tidx = state.music_track_index % tracks.len();
+    let (title, artist) = tracks[tidx];
+    let title_tw = title.len() * 8;
+    canvas.draw_text_dots(title, wx + (wsize - title_tw) / 2, m_y + 60, 1, 1, 2, 255, 255, 255, 255);
+    let artist_tw = artist.len() * 7;
+    canvas.draw_text_dots(artist, wx + (wsize - artist_tw) / 2, m_y + 80, 1, 0, 1, 160, 160, 160, 255);
+
+    // Playback controls
+    let ctrl_y = m_y + 120;
+    let ctrl_cx = wx + wsize / 2;
+    // Prev
+    canvas.draw_circle(ctrl_cx - 40, ctrl_y, 12, 255, 255, 255, 13);
+    canvas.draw_text_dots("-", ctrl_cx - 43, ctrl_y - 3, 1, 1, 0, 200, 200, 200, 255);
+    // Play/Pause
+    let play_char = if state.music_playing { "P" } else { "." };
+    canvas.draw_circle(ctrl_cx, ctrl_y, 16, 255, 255, 255, 255);
+    canvas.draw_text_dots(play_char, ctrl_cx - 3, ctrl_y - 4, 1, 1, 0, 0, 0, 0, 255);
+    // Next
+    canvas.draw_circle(ctrl_cx + 40, ctrl_y, 12, 255, 255, 255, 13);
+    canvas.draw_text_dots("-", ctrl_cx + 37, ctrl_y - 3, 1, 1, 0, 200, 200, 200, 255);
+
+    // Widget 3: System Monitor (spans 2 columns width)
+    let s_y = m_y + wsize + gap;
+    let s_w = wsize * 2 + gap;
+    let s_h = 100;
+    canvas.draw_rounded_rect(wx, s_y, s_w, s_h, 28, 18, 18, 18, 190);
+    canvas.draw_rounded_rect_border(wx, s_y, s_w, s_h, 28, 1, 255, 255, 255, 20);
+    canvas.draw_text_dots("RUST SMITHAY STATS", wx + 16, s_y + 14, 1, 0, 1, 160, 160, 160, 255);
+    canvas.draw_text_dots("LIVE", wx + s_w - 50, s_y + 14, 1, 0, 1, 255, 0, 60, 255);
+
+    // CPU bar
+    let bar_x = wx + 16;
+    let bar_w = s_w - 32;
+    let cpu_str = format!("CPU {}%", state.cpu_usage);
+    canvas.draw_text_dots(&cpu_str, bar_x, s_y + 36, 1, 0, 1, 160, 160, 160, 255);
+    canvas.draw_rounded_rect(bar_x, s_y + 50, bar_w, 6, 3, 30, 30, 30, 255);
+    let cpu_fill = (bar_w as u32 * state.cpu_usage as u32 / 100) as usize;
+    if cpu_fill > 0 {
+        canvas.draw_rounded_rect(bar_x, s_y + 50, cpu_fill.max(6), 6, 3, 255, 255, 255, 255);
+    }
+
+    // RAM bar
+    let ram_str = format!("RAM {}%", state.mem_usage);
+    canvas.draw_text_dots(&ram_str, bar_x, s_y + 64, 1, 0, 1, 160, 160, 160, 255);
+    canvas.draw_rounded_rect(bar_x, s_y + 78, bar_w, 6, 3, 30, 30, 30, 255);
+    let ram_fill = (bar_w as u32 * state.mem_usage as u32 / 100) as usize;
+    if ram_fill > 0 {
+        canvas.draw_rounded_rect(bar_x, s_y + 78, ram_fill.max(6), 6, 3, 255, 255, 255, 255);
+    }
+}
+
+/// Desktop mode: transparent full-screen canvas with top bar, desktop widgets, bottom dock
+pub fn render_desktop_canvas(state: &NothingUiState, layout_mode: crate::layout::LayoutMode, width: u32, height: u32) -> NothingCanvas {
+    let w = width as usize;
+    let h = height as usize;
+    let mut canvas = NothingCanvas::new(w, h);
+    // Transparent background (windows show through)
+    canvas.clear(0, 0, 0, 0);
+
+    draw_top_bar(&mut canvas, state, layout_mode, w, 0);
+    draw_desktop_widgets(&mut canvas, state);
+    draw_bottom_dock(&mut canvas, w, h);
 
     canvas
 }
@@ -612,6 +767,140 @@ pub fn render_dashboard_canvas(state: &NothingUiState, width: u32, height: u32) 
     let dark_status = if state.dark_mode { "ON" } else { "OFF" };
     let dark_text_x = col3_x + 90 - (dark_status.len() * 10) / 2;
     canvas.draw_text_dots(dark_status, dark_text_x, row1_y + 145, 1, 1, 3, dark_color.0, dark_color.1, dark_color.2, 255);
+
+    canvas
+}
+
+/// App Launcher fullscreen overlay
+pub fn render_app_launcher_canvas(_state: &NothingUiState, width: u32, height: u32) -> NothingCanvas {
+    let w = width as usize;
+    let h = height as usize;
+    let mut canvas = NothingCanvas::new(w, h);
+    canvas.clear(0, 0, 0, 204); // 80% black overlay
+
+    let cx = w / 2;
+
+    // Title: NOTHING APPS
+    canvas.draw_text_dots("NOTHING APPS", cx - 100, 80, 2, 1, 4, 255, 255, 255, 255);
+
+    // Close button
+    canvas.draw_circle(w - 60, 90, 16, 255, 255, 255, 25);
+    canvas.draw_text_dots("X", w - 63, 86, 1, 1, 0, 255, 255, 255, 200);
+
+    // Search bar
+    let sb_w = 500;
+    let sb_x = (w - sb_w) / 2;
+    canvas.draw_rounded_rect(sb_x, 140, sb_w, 40, 16, 255, 255, 255, 13);
+    canvas.draw_rounded_rect_border(sb_x, 140, sb_w, 40, 16, 1, 255, 255, 255, 25);
+    canvas.draw_text_dots("SEARCH APPS...", sb_x + 20, 153, 1, 1, 2, 120, 120, 120, 255);
+
+    // App grid (4 apps in a row)
+    let apps = [("TERMINAL", "T"), ("MONITOR", "A"), ("FILES", "F"), ("SETTINGS", "S")];
+    let grid_w = 400;
+    let grid_x = (w - grid_w) / 2;
+    let grid_y = 220;
+
+    for (i, (name, icon)) in apps.iter().enumerate() {
+        let ax = grid_x + i * 100 + 10;
+        let ay = grid_y;
+
+        // App card
+        canvas.draw_rounded_rect(ax, ay, 80, 100, 20, 255, 255, 255, 13);
+        canvas.draw_rounded_rect_border(ax, ay, 80, 100, 20, 1, 255, 255, 255, 13);
+
+        // Icon circle
+        canvas.draw_circle(ax + 40, ay + 35, 18, 255, 255, 255, 25);
+        canvas.draw_text_dots(icon, ax + 37, ay + 31, 1, 1, 0, 255, 255, 255, 255);
+
+        // App name
+        let nw = name.len() * 7;
+        canvas.draw_text_dots(name, ax + 40 - nw / 2, ay + 70, 1, 0, 1, 255, 255, 255, 200);
+    }
+
+    // Build version
+    canvas.draw_text_dots("V0.1.0-SMITHAY-RUST", cx - 80, h - 40, 1, 0, 1, 80, 80, 80, 255);
+
+    canvas
+}
+
+/// Quick Settings panel (right side overlay, desktop visible behind)
+pub fn render_quick_settings_canvas(state: &NothingUiState, layout_mode: crate::layout::LayoutMode, width: u32, height: u32) -> NothingCanvas {
+    let w = width as usize;
+    let h = height as usize;
+    let mut canvas = NothingCanvas::new(w, h);
+    canvas.clear(0, 0, 0, 0);
+
+    // Draw the desktop elements underneath
+    draw_top_bar(&mut canvas, state, layout_mode, w, 0);
+    draw_desktop_widgets(&mut canvas, state);
+    draw_bottom_dock(&mut canvas, w, h);
+
+    // Semi-transparent overlay on right side
+    let panel_w = 280;
+    let panel_x = w - panel_w - 16;
+    let panel_y = 64;
+    let panel_h = 420;
+
+    canvas.draw_rounded_rect(panel_x, panel_y, panel_w, panel_h, 32, 18, 18, 18, 220);
+    canvas.draw_rounded_rect_border(panel_x, panel_y, panel_w, panel_h, 32, 1, 255, 255, 255, 20);
+
+    // Header
+    canvas.draw_text_dots("NOTHING SYSTEM", panel_x + 24, panel_y + 24, 1, 1, 2, 160, 160, 160, 255);
+    // Close btn
+    canvas.draw_circle(panel_x + panel_w - 30, panel_y + 28, 10, 255, 255, 255, 25);
+    canvas.draw_text_dots("X", panel_x + panel_w - 33, panel_y + 24, 1, 1, 0, 255, 255, 255, 200);
+
+    // Toggle tiles (2x2 grid)
+    let tile_size = 100;
+    let tile_gap = 12;
+    let tiles_x = panel_x + 24;
+    let tiles_y = panel_y + 60;
+
+    let toggles = [
+        ("WIFI", state.wifi_enabled),
+        ("BT", state.bluetooth_enabled),
+        ("SLEEP", false),
+        ("ACCENT", true),
+    ];
+
+    for (i, (name, active)) in toggles.iter().enumerate() {
+        let col = i % 2;
+        let row = i / 2;
+        let tx = tiles_x + col * (tile_size + tile_gap);
+        let ty = tiles_y + row * (tile_size + tile_gap);
+
+        if *active {
+            canvas.draw_rounded_rect(tx, ty, tile_size, tile_size, 20, 255, 255, 255, 255);
+            canvas.draw_text_dots(name, tx + 12, ty + tile_size - 24, 1, 1, 2, 0, 0, 0, 255);
+        } else {
+            canvas.draw_rounded_rect(tx, ty, tile_size, tile_size, 20, 255, 255, 255, 13);
+            canvas.draw_rounded_rect_border(tx, ty, tile_size, tile_size, 20, 1, 255, 255, 255, 25);
+            canvas.draw_text_dots(name, tx + 12, ty + tile_size - 24, 1, 1, 2, 160, 160, 160, 255);
+        }
+    }
+
+    // Sliders
+    let sl_y = tiles_y + 2 * (tile_size + tile_gap) + 16;
+    let sl_w = panel_w - 48;
+
+    // Volume
+    canvas.draw_text_dots("VOLUME", panel_x + 24, sl_y, 1, 0, 1, 160, 160, 160, 255);
+    canvas.draw_rounded_rect(panel_x + 24, sl_y + 16, sl_w, 6, 3, 30, 30, 30, 255);
+    let vol_fill = (sl_w as u32 * state.volume as u32 / 100) as usize;
+    if vol_fill > 0 {
+        canvas.draw_rounded_rect(panel_x + 24, sl_y + 16, vol_fill.max(6), 6, 3, 255, 255, 255, 255);
+    }
+
+    // Brightness
+    canvas.draw_text_dots("BRIGHTNESS", panel_x + 24, sl_y + 36, 1, 0, 1, 160, 160, 160, 255);
+    canvas.draw_rounded_rect(panel_x + 24, sl_y + 52, sl_w, 6, 3, 30, 30, 30, 255);
+    let br_fill = (sl_w as u32 * state.brightness as u32 / 100) as usize;
+    if br_fill > 0 {
+        canvas.draw_rounded_rect(panel_x + 24, sl_y + 52, br_fill.max(6), 6, 3, 255, 255, 255, 255);
+    }
+
+    // Build version
+    canvas.draw_text_dots("BUILD V0.1.0", panel_x + 70, panel_y + panel_h - 24, 1, 0, 1, 80, 80, 80, 255);
 
     canvas
 }

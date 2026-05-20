@@ -14,7 +14,7 @@ use smithay::{
     },
     output::Output,
     reexports::wayland_server::Resource,
-    utils::{Logical, Point, Rectangle, Transform},
+    utils::{Point, Rectangle, Transform},
 };
 
 use crate::state::NothingCompositorState;
@@ -29,11 +29,11 @@ pub fn render_frame(
     let size = backend.window_size();
     let damage = Rectangle::from_size(size);
 
-    // Background color dynamically changes based on dark mode toggle
+    // Background color
     let clear_color = if state.ui_state.dark_mode {
-        [8.0 / 255.0, 8.0 / 255.0, 8.0 / 255.0, 1.0] // #080808
+        [8.0 / 255.0, 8.0 / 255.0, 8.0 / 255.0, 1.0]
     } else {
-        [245.0 / 255.0, 245.0 / 255.0, 245.0 / 255.0, 1.0] // #f5f5f5
+        [245.0 / 255.0, 245.0 / 255.0, 245.0 / 255.0, 1.0]
     };
 
     // 1. Update stats
@@ -42,22 +42,21 @@ pub fn render_frame(
     // 2. Get logical screen size
     let output_geo = state.space.output_geometry(output)
         .unwrap_or_else(|| Rectangle::new((0, 0).into(), (1280, 800).into()));
-    let screen_w = output_geo.size.w;
-    let screen_h = output_geo.size.h;
+    let screen_w = output_geo.size.w as u32;
+    let screen_h = output_geo.size.h as u32;
 
-    let (canvas_w, canvas_h) = if state.ui_state.ui_mode == crate::ui::UiMode::Desktop {
-        (screen_w as usize, 40)
-    } else {
-        (screen_w as usize, screen_h as usize)
-    };
+    // Determine canvas dimensions based on mode
+    // In Desktop mode: full screen canvas (top bar + desktop widgets + bottom dock)
+    // In overlay modes: full screen canvas
+    let canvas_w = screen_w as usize;
+    let canvas_h = screen_h as usize;
 
-    let scale = output.current_scale().fractional_scale();
+    let _scale = output.current_scale().fractional_scale();
 
-    // Bind renderer once inside a block to release mutable borrow of backend before submit
     {
         let (renderer, mut framebuffer) = backend.bind().unwrap();
 
-        // 3. Create or resize texture buffer if needed
+        // Create or resize texture buffer if needed
         let mut trb_needs_init = true;
         if let Some((_, (w, h))) = state.ui_render_buffer {
             if w == canvas_w as i32 && h == canvas_h as i32 {
@@ -80,14 +79,23 @@ pub fn render_frame(
             state.ui_render_buffer = Some((trb, (canvas_w as i32, canvas_h as i32)));
         }
 
-        // 4. Render canvas pixels
-        let canvas = if state.ui_state.ui_mode == crate::ui::UiMode::Desktop {
-            crate::ui::render_dock_canvas(&state.ui_state, state.layout_mode, screen_w as u32, screen_h as u32)
-        } else {
-            crate::ui::render_dashboard_canvas(&state.ui_state, screen_w as u32, screen_h as u32)
+        // Render the appropriate canvas based on UI mode
+        let canvas = match state.ui_state.ui_mode {
+            crate::ui::UiMode::Desktop => {
+                crate::ui::render_desktop_canvas(&state.ui_state, state.layout_mode, screen_w, screen_h)
+            }
+            crate::ui::UiMode::Dashboard => {
+                crate::ui::render_dashboard_canvas(&state.ui_state, screen_w, screen_h)
+            }
+            crate::ui::UiMode::AppLauncher => {
+                crate::ui::render_app_launcher_canvas(&state.ui_state, screen_w, screen_h)
+            }
+            crate::ui::UiMode::QuickSettings => {
+                crate::ui::render_quick_settings_canvas(&state.ui_state, state.layout_mode, screen_w, screen_h)
+            }
         };
 
-        // 5. Update texture buffer
+        // Update texture buffer
         if let Some((ref mut trb, _)) = state.ui_render_buffer {
             let region = smithay::utils::Rectangle::from_size(smithay::utils::Size::from((canvas_w as i32, canvas_h as i32)));
             trb.update_from_memory(
@@ -98,13 +106,10 @@ pub fn render_frame(
             ).expect("Failed to update UI texture");
         }
 
-        // 6. Build the custom elements array for space render
+        // Build custom elements
         let mut custom_elements = Vec::new();
         if let Some((ref trb, _)) = state.ui_render_buffer {
-            let location_logical: Point<f64, Logical> = Point::from((0.0, 0.0));
-            // Convert to physical location
-            let location_physical = Point::from((location_logical.x * scale, location_logical.y * scale));
-
+            let location_physical = Point::from((0.0, 0.0));
             let element = TextureRenderElement::from_texture_render_buffer(
                 location_physical,
                 trb,
@@ -116,7 +121,7 @@ pub fn render_frame(
             custom_elements.push(element);
         }
 
-        // 7. Render everything
+        // Render everything
         smithay::desktop::space::render_output(
             output,
             renderer,
@@ -133,7 +138,7 @@ pub fn render_frame(
 
     backend.submit(Some(&[damage])).unwrap();
 
-    // Send frame callbacks to clients to request the next frames
+    // Send frame callbacks
     state.space.elements().for_each(|window| {
         window.send_frame(
             output,

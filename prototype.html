@@ -1,0 +1,1018 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nothing OS Wayland DE (Rust Smithay Prototype)</title>
+    <!-- Tailwind CSS для быстрой и гибкой верстки -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Подключаем фирменные шрифты: DotGothic16 для имитации NDot и Plus Jakarta Sans для чистого интерфейса -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <!-- Иконки Lucide для элементов интерфейса -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #080808;
+            /* Точечный фон в стиле Nothing */
+            background-image: radial-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+            background-size: 24px 24px;
+            color: #f5f5f5;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .font-ndot {
+            font-family: 'DotGothic16', monospace;
+            letter-spacing: 0.05em;
+        }
+
+        /* Эффект матового стекла (Glassmorphism) */
+        .glass-panel {
+            background: rgba(18, 18, 18, 0.75);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .glass-panel-light {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Стиль полосы прокрутки */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 2px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.4);
+        }
+
+        /* Кастомный фокус для активного окна */
+        .window-active {
+            border-color: rgba(255, 255, 255, 0.35) !important;
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.7), 0 0 1px 1px rgba(255, 255, 255, 0.1);
+        }
+
+        /* Имитация глича / матрицы */
+        @keyframes scanline {
+            0% {
+                transform: translateY(-100%);
+            }
+
+            100% {
+                transform: translateY(100%);
+            }
+        }
+
+        .scanline::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 255, 0, 0.06));
+            background-size: 100% 4px, 6px 100%;
+            z-index: 2;
+            pointer-events: none;
+        }
+    </style>
+</head>
+
+<body class="h-screen w-screen flex flex-col justify-between p-4 relative overflow-hidden">
+
+    <!-- Сетка верхнего бара (Аналог Waybar) -->
+    <header
+        class="relative w-full h-12 glass-panel rounded-full flex items-center justify-between px-6 z-40 transition-all duration-300">
+        <!-- Левая часть: Статус сессии / Воркспейсы -->
+        <div class="flex items-center space-x-6">
+            <div class="flex items-center space-x-2">
+                <span class="w-2.5 h-2.5 bg-[#ff003c] rounded-full animate-pulse"></span>
+                <span class="font-ndot text-xs tracking-wider text-neutral-400">RUST-WM // SMITHAY</span>
+            </div>
+            <!-- Воркспейсы в виде фирменных точек Nothing -->
+            <div class="flex items-center space-x-2 bg-black/30 px-3 py-1.5 rounded-full border border-white/5">
+                <button onclick="switchWorkspace(1)" id="ws-1"
+                    class="w-3 h-3 rounded-full bg-white transition-all duration-300 border border-white/20"></button>
+                <button onclick="switchWorkspace(2)" id="ws-2"
+                    class="w-3 h-3 rounded-full bg-white/20 hover:bg-white/40 transition-all duration-300"></button>
+                <button onclick="switchWorkspace(3)" id="ws-3"
+                    class="w-3 h-3 rounded-full bg-white/20 hover:bg-white/40 transition-all duration-300"></button>
+                <button onclick="switchWorkspace(4)" id="ws-4"
+                    class="w-3 h-3 rounded-full bg-white/20 hover:bg-white/40 transition-all duration-300"></button>
+            </div>
+        </div>
+
+        <!-- Центральная часть: Часы и Дата (Nothing OS шрифт) -->
+        <div class="text-center flex items-center justify-center space-x-2 cursor-pointer">
+            <span id="top-time" class="font-ndot text-lg text-white font-bold tracking-widest">12:00</span>
+            <span class="text-xs text-neutral-400 font-light border-l border-white/10 pl-2" id="top-date">20 МАЯ</span>
+        </div>
+
+        <!-- Правая часть: Системные иконки, быстрые настройки -->
+        <div class="flex items-center space-x-4">
+            <!-- Переключатель режима окон (Tiling / Floating) -->
+            <button onclick="toggleTilingMode()" id="layout-toggle-btn"
+                class="flex items-center space-x-1.5 bg-white/5 hover:bg-white/10 px-3 py-1 rounded-full border border-white/10 text-xs transition-all cursor-pointer z-50">
+                <span id="layout-icon-container" class="flex items-center justify-center">
+                    <i data-lucide="layout-grid" class="w-3.5 h-3.5 text-neutral-300"></i>
+                </span>
+                <span id="layout-mode-text" class="text-neutral-300">Плавающий</span>
+            </button>
+
+            <!-- Батарея и Сеть -->
+            <div class="flex items-center space-x-2.5 text-neutral-300 text-sm">
+                <div class="flex items-center space-x-1">
+                    <i data-lucide="wifi" class="w-4 h-4 text-white"></i>
+                </div>
+                <!-- Заряд в фирменном точечном круге (SVG) -->
+                <div class="relative w-5 h-5 flex items-center justify-center">
+                    <svg class="w-5 h-5 -rotate-90">
+                        <circle cx="10" cy="10" r="8" stroke="rgba(255,255,255,0.1)" stroke-width="2"
+                            fill="transparent" />
+                        <circle cx="10" cy="10" r="8" stroke="#ffffff" stroke-width="2" fill="transparent"
+                            stroke-dasharray="50" stroke-dashoffset="12" />
+                    </svg>
+                    <span class="absolute text-[8px] font-bold text-white">76</span>
+                </div>
+            </div>
+
+            <button onclick="toggleQuickSettings()"
+                class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-all cursor-pointer">
+                <i data-lucide="sliders" class="w-4 h-4"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- ОСНОВНАЯ РАБОЧАЯ ОБЛАСТЬ (Desktop) -->
+    <main class="flex-grow w-full relative mt-4 mb-4 z-10" id="desktop-area">
+
+        <!-- Виджеты на рабочем столе (Стиль Nothing OS) -->
+        <div class="absolute left-4 top-4 grid grid-cols-2 gap-4 w-96 pointer-events-auto z-10">
+            <!-- Большой круглый виджет часов / Погоды -->
+            <div
+                class="glass-panel rounded-[2rem] p-5 aspect-square flex flex-col justify-between relative overflow-hidden group hover:border-white/20 transition-all duration-300">
+                <div class="flex justify-between items-start">
+                    <span class="font-ndot text-neutral-400 text-xs tracking-wider">MSK</span>
+                    <i data-lucide="cloud-lightning" class="w-6 h-6 text-white animate-pulse"></i>
+                </div>
+                <div class="my-auto">
+                    <div class="font-ndot text-5xl font-bold text-white leading-none">24°</div>
+                    <div class="text-xs text-neutral-400 mt-1">Гроза, +18° ночью</div>
+                </div>
+                <div class="text-[10px] uppercase tracking-wider text-neutral-500 font-bold">КРАСНОЯРСК</div>
+            </div>
+
+            <!-- Круглый виджет плеера -->
+            <div
+                class="glass-panel rounded-[2rem] p-5 aspect-square flex flex-col justify-between hover:border-white/20 transition-all duration-300">
+                <div class="flex justify-between items-center">
+                    <i data-lucide="music" class="w-4 h-4 text-[#ff003c]"></i>
+                    <span class="text-[9px] uppercase tracking-widest text-neutral-400">NOTHING EAR (2)</span>
+                </div>
+                <div class="text-center my-2">
+                    <div class="text-sm font-semibold truncate text-white" id="track-title">Overthinker</div>
+                    <div class="text-[10px] text-neutral-400 truncate mt-0.5" id="track-artist">INZO</div>
+                </div>
+                <div class="flex justify-center items-center space-x-3">
+                    <button
+                        class="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-all text-neutral-300 cursor-pointer"
+                        onclick="prevTrack()">
+                        <i data-lucide="skip-back" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <button
+                        class="w-10 h-10 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 transition-all cursor-pointer"
+                        onclick="togglePlay()">
+                        <span id="play-icon-container" class="flex items-center justify-center">
+                            <i data-lucide="play" class="w-4 h-4 fill-black text-black"></i>
+                        </span>
+                    </button>
+                    <button
+                        class="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-all text-neutral-300 cursor-pointer"
+                        onclick="nextTrack()">
+                        <i data-lucide="skip-forward" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Системный монитор (Имитация вывода из Rust) -->
+            <div class="glass-panel col-span-2 rounded-[2rem] p-5 hover:border-white/20 transition-all duration-300">
+                <div class="flex justify-between items-center mb-4">
+                    <span class="font-ndot text-xs text-neutral-400 tracking-wider">RUST_SMITHAY_STATS</span>
+                    <span class="text-[10px] text-[#ff003c] font-mono">LIVE ENGINE</span>
+                </div>
+                <div class="space-y-3">
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-neutral-400">Загрузка ЦП (Rust Kernel)</span>
+                            <span class="font-mono" id="cpu-val">12%</span>
+                        </div>
+                        <div class="h-1.5 w-full bg-neutral-900 rounded-full overflow-hidden">
+                            <div class="h-full bg-white rounded-full transition-all duration-500" id="cpu-bar"
+                                style="width: 12%"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-neutral-400">Память (Compositor RAM)</span>
+                            <span class="font-mono" id="ram-val">342MB</span>
+                        </div>
+                        <div class="h-1.5 w-full bg-neutral-900 rounded-full overflow-hidden">
+                            <div class="h-full bg-white rounded-full transition-all duration-500" id="ram-bar"
+                                style="width: 25%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Контейнер для окон симулятора Wayland -->
+        <div id="window-container" class="absolute inset-0 w-full h-full pointer-events-none z-20">
+            <!-- Окна генерируются динамически через JS -->
+        </div>
+
+    </main>
+
+    <!-- НИЖНИЙ ДОК (Launcher & Быстрый Запуск) -->
+    <footer class="w-full flex justify-center z-40">
+        <div class="glass-panel px-6 py-3 rounded-full flex items-center space-x-6">
+            <!-- Кнопка лаунчера (фирменная решетка) -->
+            <button onclick="toggleAppLauncher()"
+                class="w-10 h-10 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 transition-all duration-300 shadow-lg shadow-black/50 cursor-pointer">
+                <i data-lucide="grid" class="w-5 h-5"></i>
+            </button>
+            <div class="w-[1px] h-6 bg-white/10"></div>
+            <!-- Быстрые приложения -->
+            <div class="flex items-center space-x-4">
+                <button onclick="spawnApp('terminal')"
+                    class="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center transition-all relative group cursor-pointer"
+                    title="Alacritty Terminal (Rust)">
+                    <i data-lucide="terminal" class="w-4 h-4 text-white"></i>
+                    <span
+                        class="absolute -top-10 left-1/2 -translate-x-1/2 bg-black text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">Терминал
+                        (Rust)</span>
+                </button>
+                <button onclick="spawnApp('sysmon')"
+                    class="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center transition-all relative group cursor-pointer"
+                    title="System Logs & Monitor">
+                    <i data-lucide="activity" class="w-4 h-4 text-white"></i>
+                    <span
+                        class="absolute -top-10 left-1/2 -translate-x-1/2 bg-black text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">Логи
+                        Smithay</span>
+                </button>
+                <button onclick="spawnApp('files')"
+                    class="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center transition-all relative group cursor-pointer"
+                    title="Nothing Files">
+                    <i data-lucide="folder" class="w-4 h-4 text-white"></i>
+                    <span
+                        class="absolute -top-10 left-1/2 -translate-x-1/2 bg-black text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">Проводник</span>
+                </button>
+                <button onclick="spawnApp('settings')"
+                    class="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center transition-all relative group cursor-pointer"
+                    title="DE Settings">
+                    <i data-lucide="settings" class="w-4 h-4 text-white"></i>
+                    <span
+                        class="absolute -top-10 left-1/2 -translate-x-1/2 bg-black text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">Параметры
+                        DE</span>
+                </button>
+            </div>
+        </div>
+    </footer>
+
+    <!-- ПАНЕЛЬ БЫСТРЫХ НАСТРОЕК (Выезжает справа) -->
+    <div id="quick-settings"
+        class="fixed right-4 top-20 w-80 glass-panel rounded-[2.5rem] p-6 z-50 transform translate-x-[120%] transition-transform duration-300 ease-out">
+        <div class="flex justify-between items-center mb-6">
+            <span class="font-ndot text-sm text-neutral-400">NOTHING SYSTEM</span>
+            <button onclick="toggleQuickSettings()"
+                class="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 cursor-pointer">
+                <i data-lucide="x" class="w-3.5 h-3.5"></i>
+            </button>
+        </div>
+
+        <!-- Крупные кнопки переключателей (Nothing OS Style) -->
+        <div class="grid grid-cols-2 gap-3 mb-6">
+            <div onclick="toggleQuickSettingState(this)"
+                class="bg-white text-black p-4 rounded-3xl flex flex-col justify-between aspect-square cursor-pointer hover:opacity-90 transition-all">
+                <i data-lucide="wifi" class="w-6 h-6"></i>
+                <div>
+                    <div class="font-semibold text-xs">Wi-Fi</div>
+                    <div class="text-[10px] opacity-70">Nothing_Net_5G</div>
+                </div>
+            </div>
+            <div onclick="toggleQuickSettingState(this)"
+                class="bg-white/5 text-white border border-white/10 p-4 rounded-3xl flex flex-col justify-between aspect-square cursor-pointer hover:bg-white/10 transition-all">
+                <i data-lucide="bluetooth" class="w-6 h-6 text-neutral-400"></i>
+                <div>
+                    <div class="font-semibold text-xs">Bluetooth</div>
+                    <div class="text-[10px] text-neutral-400">Подключено</div>
+                </div>
+            </div>
+            <div onclick="toggleQuickSettingState(this)"
+                class="bg-white/5 text-white border border-white/10 p-4 rounded-3xl flex flex-col justify-between aspect-square cursor-pointer hover:bg-white/10 transition-all">
+                <i data-lucide="eye-off" class="w-6 h-6 text-neutral-400"></i>
+                <div>
+                    <div class="font-semibold text-xs">Режим сна</div>
+                    <div class="text-[10px] text-neutral-400">Выключен</div>
+                </div>
+            </div>
+            <div onclick="toggleQuickSettingState(this)"
+                class="bg-white/5 text-white border border-white/10 p-4 rounded-3xl flex flex-col justify-between aspect-square cursor-pointer hover:bg-white/10 transition-all">
+                <i data-lucide="focus" class="w-6 h-6 text-neutral-400"></i>
+                <div>
+                    <div class="font-semibold text-xs">Акцент</div>
+                    <div class="text-[10px] text-neutral-400">Красный диод</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Слайдеры яркости и звука -->
+        <div class="space-y-4">
+            <div>
+                <div class="flex justify-between text-xs text-neutral-400 mb-1">
+                    <span>Громкость</span>
+                    <i data-lucide="volume-2" class="w-3.5 h-3.5"></i>
+                </div>
+                <input type="range" min="0" max="100" value="80"
+                    class="w-full accent-white bg-white/10 h-1 rounded-full cursor-pointer">
+            </div>
+            <div>
+                <div class="flex justify-between text-xs text-neutral-400 mb-1">
+                    <span>Яркость</span>
+                    <i data-lucide="sun" class="w-3.5 h-3.5"></i>
+                </div>
+                <input type="range" min="0" max="100" value="70"
+                    class="w-full accent-white bg-white/10 h-1 rounded-full cursor-pointer">
+            </div>
+        </div>
+
+        <div class="mt-6 pt-4 border-t border-white/10 text-center text-[10px] text-neutral-500 font-mono">
+            BUILD v0.1.0-SMITHAY-RUST
+        </div>
+    </div>
+
+    <!-- ЛАУНЧЕР ПРИЛОЖЕНИЙ (Выезжает снизу) -->
+    <div id="app-launcher"
+        class="fixed inset-0 bg-black/80 backdrop-blur-2xl z-50 flex items-center justify-center transform translate-y-full transition-transform duration-300 ease-out pointer-events-auto">
+        <div class="w-full max-w-2xl px-6">
+            <div class="flex justify-between items-center mb-8">
+                <span class="font-ndot text-2xl text-white tracking-widest">NOTHING APPS</span>
+                <button onclick="toggleAppLauncher()"
+                    class="w-10 h-10 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-all cursor-pointer">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <!-- Поисковая строка -->
+            <div class="relative mb-8">
+                <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400 w-5 h-5"></i>
+                <input type="text" placeholder="Поиск приложений (Wayland registry)..."
+                    class="w-full h-14 pl-12 pr-4 bg-white/5 border border-white/10 rounded-2xl text-white placeholder-neutral-500 focus:outline-none focus:border-white/30 transition-all">
+            </div>
+
+            <!-- Сетка программ -->
+            <div class="grid grid-cols-4 gap-6">
+                <div onclick="spawnApp('terminal'); toggleAppLauncher();"
+                    class="flex flex-col items-center p-4 bg-white/5 hover:bg-white/10 rounded-3xl cursor-pointer border border-white/5 transition-all duration-300">
+                    <div class="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center mb-3">
+                        <i data-lucide="terminal" class="w-6 h-6 text-white"></i>
+                    </div>
+                    <span class="text-xs font-semibold">Terminal</span>
+                    <span class="text-[9px] text-neutral-500 mt-1">Alacritty</span>
+                </div>
+                <div onclick="spawnApp('sysmon'); toggleAppLauncher();"
+                    class="flex flex-col items-center p-4 bg-white/5 hover:bg-white/10 rounded-3xl cursor-pointer border border-white/5 transition-all duration-300">
+                    <div class="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center mb-3">
+                        <i data-lucide="activity" class="w-6 h-6 text-white"></i>
+                    </div>
+                    <span class="text-xs font-semibold">Smithay Monitor</span>
+                    <span class="text-[9px] text-neutral-500 mt-1">Rust OS Debug</span>
+                </div>
+                <div onclick="spawnApp('files'); toggleAppLauncher();"
+                    class="flex flex-col items-center p-4 bg-white/5 hover:bg-white/10 rounded-3xl cursor-pointer border border-white/5 transition-all duration-300">
+                    <div class="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center mb-3">
+                        <i data-lucide="folder" class="w-6 h-6 text-white"></i>
+                    </div>
+                    <span class="text-xs font-semibold">Nothing Files</span>
+                    <span class="text-[9px] text-neutral-500 mt-1">Проводник</span>
+                </div>
+                <div onclick="spawnApp('settings'); toggleAppLauncher();"
+                    class="flex flex-col items-center p-4 bg-white/5 hover:bg-white/10 rounded-3xl cursor-pointer border border-white/5 transition-all duration-300">
+                    <div class="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center mb-3">
+                        <i data-lucide="settings" class="w-6 h-6 text-white"></i>
+                    </div>
+                    <span class="text-xs font-semibold">Settings</span>
+                    <span class="text-[9px] text-neutral-500 mt-1">Параметры DE</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Скрипты симуляции работы Wayland оконного менеджера -->
+    <script>
+        // Инициализируем иконки в первый раз
+        lucide.createIcons();
+
+        // Стейт нашей виртуальной DE
+        let state = {
+            tilingMode: false, // false = Floating, true = Tiling
+            currentWorkspace: 1,
+            activeWindowId: null,
+            nextWindowId: 1,
+            windows: [], // массив активных окон
+            quickSettingsOpen: false,
+            appLauncherOpen: false,
+            isPlaying: false,
+            currentTrackIndex: 0,
+            tracks: [
+                { title: "Overthinker", artist: "INZO" },
+                { title: "Nothing Else", artist: "Joe Hertz" },
+                { title: "Ghost in the Shell", artist: "Kenji Kawai" }
+            ]
+        };
+
+        // Логгер для Имитации Rust Wayland Композитора
+        function logCompositorEvent(message) {
+            const logsContainer = document.getElementById('compositor-live-logs');
+            if (logsContainer) {
+                const timeStr = new Date().toLocaleTimeString();
+                const logLine = document.createElement('div');
+                logLine.className = 'text-neutral-300 text-xs font-mono py-0.5 border-b border-white/5';
+                logLine.innerHTML = `<span class="text-neutral-500">[${timeStr}]</span> <span class="text-[#ff003c]">smithay_wm::</span>${message}`;
+                logsContainer.appendChild(logLine);
+                logsContainer.scrollTop = logsContainer.scrollHeight;
+            }
+        }
+
+        // Локальные часы
+        function updateClock() {
+            const now = new Date();
+            const hrs = String(now.getHours()).padStart(2, '0');
+            const mins = String(now.getMinutes()).padStart(2, '0');
+            document.getElementById('top-time').innerText = `${hrs}:${mins}`;
+
+            const months = ["ЯНВ", "ФЕВ", "МАР", "АПР", "МАЙ", "ИЮН", "ИЮЛ", "АВГ", "СЕН", "ОКТ", "НОЯ", "ДЕК"];
+            const dateStr = `${now.getDate()} ${months[now.getMonth()]}`;
+            document.getElementById('top-date').innerText = dateStr;
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // Смена рабочих столов (Воркспейсов)
+        function switchWorkspace(id) {
+            document.querySelectorAll('[id^="ws-"]').forEach(btn => {
+                btn.className = "w-3 h-3 rounded-full bg-white/20 hover:bg-white/40 transition-all duration-300";
+            });
+            document.getElementById(`ws-${id}`).className = "w-3 h-3 rounded-full bg-white transition-all duration-300 border border-white/20";
+            state.currentWorkspace = id;
+            logCompositorEvent(`Workspace switched to workspace_id=${id}`);
+
+            // Скрывать/показывать окна этого воркспрейса
+            state.windows.forEach(w => {
+                const el = document.getElementById(`win-${w.id}`);
+                if (el) {
+                    if (w.workspace === id) {
+                        el.classList.remove('hidden');
+                    } else {
+                        el.classList.add('hidden');
+                    }
+                }
+            });
+            reorganizeWindows();
+        }
+
+        // Лаунчер приложений
+        function toggleAppLauncher() {
+            state.appLauncherOpen = !state.appLauncherOpen;
+            const launcher = document.getElementById('app-launcher');
+            if (state.appLauncherOpen) {
+                launcher.classList.remove('translate-y-full');
+                logCompositorEvent('wl_shell::launch_panel_visible(true)');
+            } else {
+                launcher.classList.add('translate-y-full');
+                logCompositorEvent('wl_shell::launch_panel_visible(false)');
+            }
+        }
+
+        // Быстрые настройки
+        function toggleQuickSettings() {
+            state.quickSettingsOpen = !state.quickSettingsOpen;
+            const qs = document.getElementById('quick-settings');
+            if (state.quickSettingsOpen) {
+                qs.classList.remove('translate-x-[120%]');
+                logCompositorEvent('layer_shell::quick_settings_draw(active)');
+            } else {
+                qs.classList.add('translate-x-[120%]');
+            }
+        }
+
+        function toggleQuickSettingState(element) {
+            const icon = element.querySelector('i, svg');
+            if (element.classList.contains('bg-white')) {
+                // Выключаем статус настройки
+                element.className = "bg-white/5 text-white border border-white/10 p-4 rounded-3xl flex flex-col justify-between aspect-square cursor-pointer hover:bg-white/10 transition-all";
+                if (icon) {
+                    icon.classList.add('text-neutral-400');
+                }
+                logCompositorEvent(`layer_shell::toggle_param_state(off)`);
+            } else {
+                // Включаем статус настройки
+                element.className = "bg-white text-black p-4 rounded-3xl flex flex-col justify-between aspect-square cursor-pointer hover:opacity-90 transition-all";
+                if (icon) {
+                    icon.classList.remove('text-neutral-400');
+                }
+                logCompositorEvent(`layer_shell::toggle_param_state(on)`);
+            }
+        }
+
+        // Музыкальный плеер
+        function togglePlay() {
+            state.isPlaying = !state.isPlaying;
+            const playContainer = document.getElementById('play-icon-container');
+            if (state.isPlaying) {
+                playContainer.innerHTML = '<i data-lucide="pause" class="w-4 h-4 fill-black text-black"></i>';
+                logCompositorEvent(`client_event::media_player(state="playing", track="${state.tracks[state.currentTrackIndex].title}")`);
+            } else {
+                playContainer.innerHTML = '<i data-lucide="play" class="w-4 h-4 fill-black text-black"></i>';
+                logCompositorEvent(`client_event::media_player(state="paused")`);
+            }
+            lucide.createIcons();
+        }
+
+        function updateTrackDisplay() {
+            document.getElementById('track-title').innerText = state.tracks[state.currentTrackIndex].title;
+            document.getElementById('track-artist').innerText = state.tracks[state.currentTrackIndex].artist;
+        }
+
+        function nextTrack() {
+            state.currentTrackIndex = (state.currentTrackIndex + 1) % state.tracks.length;
+            updateTrackDisplay();
+            logCompositorEvent(`client_event::media_player(next_track="${state.tracks[state.currentTrackIndex].title}")`);
+        }
+
+        function prevTrack() {
+            state.currentTrackIndex = (state.currentTrackIndex - 1 + state.tracks.length) % state.tracks.length;
+            updateTrackDisplay();
+            logCompositorEvent(`client_event::media_player(prev_track="${state.tracks[state.currentTrackIndex].title}")`);
+        }
+
+        // Эмуляция системного мониторинга в реальном времени
+        setInterval(() => {
+            const cpu = Math.floor(Math.random() * 25) + 5;
+            const ram = Math.floor(Math.random() * 50) + 320;
+            const cpuVal = document.getElementById('cpu-val');
+            const cpuBar = document.getElementById('cpu-bar');
+            const ramVal = document.getElementById('ram-val');
+            const ramBar = document.getElementById('ram-bar');
+
+            if (cpuVal && cpuBar) {
+                cpuVal.innerText = `${cpu}%`;
+                cpuBar.style.width = `${cpu}%`;
+            }
+            if (ramVal && ramBar) {
+                ramVal.innerText = `${ram}MB`;
+                ramBar.style.width = `${(ram / 1024) * 100}%`;
+            }
+        }, 3000);
+
+        // ============================================
+        // ЛОГИКА ОКННОГО МЕНЕДЖЕРА WAYLAND (Simulated)
+        // ============================================
+
+        function toggleTilingMode() {
+            state.tilingMode = !state.tilingMode;
+            const text = document.getElementById('layout-mode-text');
+            const iconContainer = document.getElementById('layout-icon-container');
+
+            if (state.tilingMode) {
+                text.innerText = "Тайлинг";
+                iconContainer.innerHTML = '<i data-lucide="columns" class="w-3.5 h-3.5 text-neutral-300"></i>';
+                logCompositorEvent('smithay_wm::switch_layout(Tiling)');
+            } else {
+                text.innerText = "Плавающий";
+                iconContainer.innerHTML = '<i data-lucide="layout-grid" class="w-3.5 h-3.5 text-neutral-300"></i>';
+                logCompositorEvent('smithay_wm::switch_layout(Floating)');
+            }
+            lucide.createIcons();
+            reorganizeWindows();
+        }
+
+        // Спавн приложения (генерация виртуального Wayland-клиента)
+        function spawnApp(type) {
+            let title = "App";
+            let content = "";
+            let width = 500;
+            let height = 350;
+
+            if (type === 'terminal') {
+                title = "alacritty // bash";
+                content = `
+                    <div class="p-4 font-mono text-xs text-[#00ff66] h-full flex flex-col justify-between">
+                        <div>
+                            <div class="text-neutral-500">Wayland client connected on socket /run/user/1000/wayland-0</div>
+                            <div class="mt-2 text-white">nothing_de_rust$ <span class="text-neutral-400">cargo run --release</span></div>
+                            <div class="text-yellow-400">   Compiling nothing-wm v0.1.0 (/home/dev/nothing-wm)</div>
+                            <div class="text-neutral-300">    Finished release [optimized] target(s) in 2.34s</div>
+                            <div class="text-neutral-300">     Running \`target/release/nothing-wm\`</div>
+                        </div>
+                        <div class="text-neutral-500 border-t border-white/10 pt-2 flex justify-between">
+                            <span>sh-5.2#</span>
+                            <span class="text-right">Smithay Backend Active</span>
+                        </div>
+                    </div>
+                `;
+            } else if (type === 'sysmon') {
+                title = "smithay_debugger_output";
+                content = `
+                    <div class="h-full flex flex-col bg-black/60">
+                        <div class="px-4 py-2 border-b border-white/5 flex justify-between items-center text-[10px] text-neutral-400">
+                            <span>АКТИВНЫЕ СОБЫТИЯ WAYLAND</span>
+                            <span class="text-[#ff003c]">● LIVE</span>
+                        </div>
+                        <div id="compositor-live-logs" class="p-4 flex-grow overflow-y-auto space-y-1 font-mono text-xs max-h-[250px]">
+                            <div class="text-neutral-500">[System] Initializing Smithay Backend...</div>
+                            <div class="text-neutral-300">[Smithay] Creating udev / drm backend</div>
+                            <div class="text-neutral-300">[Smithay] Successfully bound wayland socket: wayland-0</div>
+                        </div>
+                    </div>
+                `;
+                width = 580;
+                height = 320;
+            } else if (type === 'files') {
+                title = "nothing_files";
+                content = `
+                    <div class="grid grid-cols-4 h-full text-xs">
+                        <div class="border-r border-white/10 p-3 space-y-2 text-neutral-400 bg-white/5">
+                            <div class="font-semibold text-white mb-2">Места</div>
+                            <div class="flex items-center space-x-2 text-white"><i data-lucide="home" class="w-3.5 h-3.5"></i> <span>Дом</span></div>
+                            <div class="flex items-center space-x-2"><i data-lucide="folder" class="w-3.5 h-3.5"></i> <span>Проекты</span></div>
+                            <div class="flex items-center space-x-2"><i data-lucide="download" class="w-3.5 h-3.5"></i> <span>Загрузки</span></div>
+                            <div class="flex items-center space-x-2"><i data-lucide="music" class="w-3.5 h-3.5"></i> <span>Музыка</span></div>
+                        </div>
+                        <div class="col-span-3 p-4 grid grid-cols-3 gap-4 align-content-start overflow-y-auto max-h-[250px]">
+                            <div class="flex flex-col items-center p-2 rounded-xl hover:bg-white/5 cursor-pointer">
+                                <i data-lucide="folder" class="w-10 h-10 text-neutral-300"></i>
+                                <span class="mt-1">nothing-wm</span>
+                            </div>
+                            <div class="flex flex-col items-center p-2 rounded-xl hover:bg-white/5 cursor-pointer">
+                                <i data-lucide="folder" class="w-10 h-10 text-neutral-300"></i>
+                                <span class="mt-1">smithay-core</span>
+                            </div>
+                            <div class="flex flex-col items-center p-2 rounded-xl hover:bg-white/5 cursor-pointer">
+                                <i data-lucide="file-code" class="w-10 h-10 text-[#ff003c]"></i>
+                                <span class="mt-1">Cargo.toml</span>
+                            </div>
+                            <div class="flex flex-col items-center p-2 rounded-xl hover:bg-white/5 cursor-pointer">
+                                <i data-lucide="file-text" class="w-10 h-10 text-neutral-300"></i>
+                                <span class="mt-1">README.md</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else if (type === 'settings') {
+                title = "nothing_de_settings";
+                content = `
+                    <div class="p-6 space-y-4 text-xs">
+                        <div class="font-ndot text-sm mb-2 text-white uppercase">Wayland Compositor Properties</div>
+                        <div class="space-y-3">
+                            <div class="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/5">
+                                <div>
+                                    <div class="font-semibold">Размытие (Compositor Blur)</div>
+                                    <div class="text-[10px] text-neutral-500">Отрендерить шейдером Smithay</div>
+                                </div>
+                                <input type="checkbox" checked class="w-4 h-4 accent-white">
+                            </div>
+                            <div class="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/5">
+                                <div>
+                                    <div class="font-semibold">Тема рамок (Border styling)</div>
+                                    <div class="text-[10px] text-neutral-500">Точечные рамки Nothing OS</div>
+                                </div>
+                                <select class="bg-[#121212] border border-white/10 rounded-md p-1 text-white">
+                                    <option>Точечная (Красный акцент)</option>
+                                    <option>Черно-белая</option>
+                                    <option>Без рамок</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            const winId = state.nextWindowId++;
+            const winObj = {
+                id: winId,
+                title: title,
+                type: type,
+                x: 100 + (winId * 30),
+                y: 50 + (winId * 20),
+                width: width,
+                height: height,
+                isMaximized: false,
+                workspace: state.currentWorkspace
+            };
+
+            state.windows.push(winObj);
+            renderWindow(winObj, content);
+            focusWindow(winId);
+            reorganizeWindows();
+
+            logCompositorEvent(`Client created: class="xdg_toplevel", title="${title}", id=${winId}`);
+        }
+
+        // Генерация разметки окна в DOM
+        function renderWindow(win, content) {
+            const winEl = document.createElement('div');
+            winEl.id = `win-${win.id}`;
+            winEl.className = `absolute glass-panel rounded-2xl flex flex-col overflow-hidden pointer-events-auto shadow-2xl transition-all duration-200 border border-white/10 z-20`;
+            winEl.style.width = `${win.width}px`;
+            winEl.style.height = `${win.height}px`;
+            winEl.style.left = `${win.x}px`;
+            winEl.style.top = `${win.y}px`;
+
+            winEl.innerHTML = `
+                <!-- Заголовок Окна -->
+                <div class="h-10 border-b border-white/10 px-4 flex items-center justify-between cursor-move bg-black/40 select-none header-drag">
+                    <div class="flex items-center space-x-2">
+                        <span class="w-1.5 h-1.5 bg-neutral-600 rounded-full window-indicator"></span>
+                        <span class="text-xs font-mono font-bold tracking-wider text-neutral-300 font-ndot">${win.title}</span>
+                    </div>
+                    <div class="flex items-center space-x-1.5">
+                        <button onclick="minimizeWindow(${win.id}, event)" class="w-4 h-4 rounded-full bg-white/5 hover:bg-white/15 flex items-center justify-center text-neutral-400 hover:text-white transition-all cursor-pointer">
+                            <i data-lucide="minus" class="w-2.5 h-2.5"></i>
+                        </button>
+                        <button onclick="maximizeWindow(${win.id}, event)" class="w-4 h-4 rounded-full bg-white/5 hover:bg-white/15 flex items-center justify-center text-neutral-400 hover:text-white transition-all cursor-pointer">
+                            <i data-lucide="maximize-2" class="w-2.5 h-2.5"></i>
+                        </button>
+                        <button onclick="closeWindow(${win.id}, event)" class="w-4 h-4 rounded-full bg-[#ff003c]/20 hover:bg-[#ff003c]/40 flex items-center justify-center text-[#ff003c] transition-all cursor-pointer">
+                            <i data-lucide="x" class="w-2.5 h-2.5"></i>
+                        </button>
+                    </div>
+                </div>
+                <!-- Контент Окна -->
+                <div class="flex-grow overflow-auto relative bg-black/20">
+                    ${content}
+                </div>
+                <!-- Зона изменения размера (Resize Handle) -->
+                <div class="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize flex items-end justify-end p-0.5 select-none resize-handle">
+                    <svg width="6" height="6" viewBox="0 0 6 6" fill="none"><path d="M6 6L0 6L6 0L6 6Z" fill="rgba(255,255,255,0.3)"/></svg>
+                </div>
+            `;
+
+            document.getElementById('window-container').appendChild(winEl);
+            lucide.createIcons({ attrs: { class: "lucide-icon" }, nameAttr: "data-lucide" });
+
+            // Фокусировка при клике на окно
+            winEl.addEventListener('mousedown', () => focusWindow(win.id));
+
+            // Логика перемещения окон
+            setupDragAndResize(win, winEl);
+        }
+
+        // Перетаскивание и изменение размера (Drag & Resize)
+        function setupDragAndResize(win, el) {
+            const header = el.querySelector('.header-drag');
+            const resizer = el.querySelector('.resize-handle');
+
+            let isDragging = false;
+            let isResizing = false;
+            let startX, startY, startLeft, startTop, startWidth, startHeight;
+
+            header.addEventListener('mousedown', (e) => {
+                if (state.tilingMode) return; // в тайлинге нельзя перетаскивать свободно
+                isDragging = true;
+                startX = e.clientX;
+                startY = e.clientY;
+                startLeft = parseInt(el.style.left);
+                startTop = parseInt(el.style.top);
+                focusWindow(win.id);
+                e.preventDefault();
+            });
+
+            resizer.addEventListener('mousedown', (e) => {
+                if (state.tilingMode) return; // в тайлинге нельзя ресайзить вручную
+                isResizing = true;
+                startX = e.clientX;
+                startY = e.clientY;
+                startWidth = parseInt(el.style.width);
+                startHeight = parseInt(el.style.height);
+                focusWindow(win.id);
+                e.preventDefault();
+                e.stopPropagation();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    const dx = e.clientX - startX;
+                    const dy = e.clientY - startY;
+                    win.x = startLeft + dx;
+                    win.y = startTop + dy;
+                    el.style.left = `${win.x}px`;
+                    el.style.top = `${win.y}px`;
+                }
+                if (isResizing) {
+                    const dx = e.clientX - startX;
+                    const dy = e.clientY - startY;
+                    win.width = Math.max(250, startWidth + dx);
+                    win.height = Math.max(150, startHeight + dy);
+                    el.style.width = `${win.width}px`;
+                    el.style.height = `${win.height}px`;
+                }
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (isDragging || isResizing) {
+                    isDragging = false;
+                    isResizing = false;
+                    logCompositorEvent(`smithay_wm::toplevel_configure(id=${win.id}, geom=[x:${win.x}, y:${win.y}, w:${win.width}, h:${win.height}])`);
+                }
+            });
+
+            // Поддержка Touch на сенсорных экранах
+            header.addEventListener('touchstart', (e) => {
+                if (state.tilingMode) return;
+                isDragging = true;
+                const touch = e.touches[0];
+                startX = touch.clientX;
+                startY = touch.clientY;
+                startLeft = parseInt(el.style.left);
+                startTop = parseInt(el.style.top);
+                focusWindow(win.id);
+            });
+
+            document.addEventListener('touchmove', (e) => {
+                if (isDragging && e.touches.length > 0) {
+                    const touch = e.touches[0];
+                    const dx = touch.clientX - startX;
+                    const dy = touch.clientY - startY;
+                    win.x = startLeft + dx;
+                    win.y = startTop + dy;
+                    el.style.left = `${win.x}px`;
+                    el.style.top = `${win.y}px`;
+                }
+            });
+
+            document.addEventListener('touchend', () => {
+                isDragging = false;
+            });
+        }
+
+        // Переключение фокуса окна
+        function focusWindow(id) {
+            state.activeWindowId = id;
+            document.querySelectorAll('[id^="win-"]').forEach(wEl => {
+                wEl.classList.remove('window-active');
+                wEl.style.zIndex = 20;
+                wEl.querySelector('.window-indicator').className = "w-1.5 h-1.5 bg-neutral-600 rounded-full window-indicator";
+            });
+
+            const activeEl = document.getElementById(`win-${id}`);
+            if (activeEl) {
+                activeEl.classList.add('window-active');
+                activeEl.style.zIndex = 30;
+                activeEl.querySelector('.window-indicator').className = "w-1.5 h-1.5 bg-[#ff003c] rounded-full window-indicator";
+            }
+            logCompositorEvent(`smithay_wm::keyboard_focus_changed(client_id=${id})`);
+        }
+
+        // Закрытие Окна
+        function closeWindow(id, e) {
+            if (e) e.stopPropagation();
+            state.windows = state.windows.filter(w => w.id !== id);
+            const el = document.getElementById(`win-${id}`);
+            if (el) el.remove();
+            reorganizeWindows();
+            logCompositorEvent(`smithay_wm::toplevel_closed(id=${id})`);
+        }
+
+        // Максимизация Окна
+        function maximizeWindow(id, e) {
+            if (e) e.stopPropagation();
+            const win = state.windows.find(w => w.id === id);
+            const el = document.getElementById(`win-${id}`);
+            if (!win || !el || state.tilingMode) return;
+
+            win.isMaximized = !win.isMaximized;
+            if (win.isMaximized) {
+                el.style.width = "100%";
+                el.style.height = "100%";
+                el.style.left = "0px";
+                el.style.top = "0px";
+                el.classList.add('rounded-none');
+                logCompositorEvent(`smithay_wm::maximize_request(id=${id}, maximized=true)`);
+            } else {
+                el.style.width = `${win.width}px`;
+                el.style.height = `${win.height}px`;
+                el.style.left = `${win.x}px`;
+                el.style.top = `${win.y}px`;
+                el.classList.remove('rounded-none');
+                logCompositorEvent(`smithay_wm::maximize_request(id=${id}, maximized=false)`);
+            }
+        }
+
+        // Сворачивание Окна
+        function minimizeWindow(id, e) {
+            if (e) e.stopPropagation();
+            logCompositorEvent(`smithay_wm::minimize_request(id=${id})`);
+            const el = document.getElementById(`win-${id}`);
+            if (el) el.classList.add('hidden');
+        }
+
+        // Автоматическая реорганизация при смене режима (Tiling / Floating)
+        function reorganizeWindows() {
+            const currentWSWindows = state.windows.filter(w => w.workspace === state.currentWorkspace);
+            const count = currentWSWindows.length;
+
+            if (state.tilingMode && count > 0) {
+                const containerWidth = document.getElementById('desktop-area').clientWidth;
+                const containerHeight = document.getElementById('desktop-area').clientHeight;
+
+                currentWSWindows.forEach((win, index) => {
+                    const el = document.getElementById(`win-${win.id}`);
+                    if (!el) return;
+
+                    el.classList.remove('rounded-2xl');
+                    el.classList.add('rounded-lg');
+
+                    let w, h, x, y;
+
+                    if (count === 1) {
+                        w = containerWidth - 16;
+                        h = containerHeight - 16;
+                        x = 8;
+                        y = 8;
+                    } else if (count === 2) {
+                        w = (containerWidth / 2) - 12;
+                        h = containerHeight - 16;
+                        x = index === 0 ? 8 : (containerWidth / 2) + 4;
+                        y = 8;
+                    } else {
+                        if (index === 0) {
+                            w = (containerWidth * 0.6) - 12;
+                            h = containerHeight - 16;
+                            x = 8;
+                            y = 8;
+                        } else {
+                            const stackCount = count - 1;
+                            w = (containerWidth * 0.4) - 12;
+                            h = ((containerHeight - 16) / stackCount) - (8 * (stackCount - 1) / stackCount);
+                            x = (containerWidth * 0.6) + 4;
+                            y = 8 + ((index - 1) * (h + 8));
+                        }
+                    }
+
+                    el.style.width = `${w}px`;
+                    el.style.height = `${h}px`;
+                    el.style.left = `${x}px`;
+                    el.style.top = `${y}px`;
+                });
+            } else {
+                currentWSWindows.forEach(win => {
+                    const el = document.getElementById(`win-${win.id}`);
+                    if (!el) return;
+
+                    el.classList.add('rounded-2xl');
+                    el.classList.remove('rounded-lg');
+
+                    if (win.isMaximized) {
+                        el.style.width = "100%";
+                        el.style.height = "100%";
+                        el.style.left = "0px";
+                        el.style.top = "0px";
+                    } else {
+                        el.style.width = `${win.width}px`;
+                        el.style.height = `${win.height}px`;
+                        el.style.left = `${win.x}px`;
+                        el.style.top = `${win.y}px`;
+                    }
+                });
+            }
+        }
+
+        // Автозапуск дефолтных приложений при старте системы
+        window.onload = function () {
+            setTimeout(() => {
+                spawnApp('sysmon');
+                spawnApp('terminal');
+                logCompositorEvent('smithay_wm::initialized(complete)');
+            }, 600);
+        }
+    </script>
+</body>
+
+</html>
